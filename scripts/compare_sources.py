@@ -39,25 +39,25 @@ class Source:
         elif zipfile.is_zipfile(path):
             self.archive = zipfile.ZipFile(path)
             entries = [i for i in self.archive.infolist() if not i.is_dir()]
-            # Sony archives may use a WebKit-1400/ root on one side but not
-            # the other, and they can also contain a root-level changelog.
-            # Normalize only the known version-specific WebKit container,
-            # regardless of how many extra files are at ZIP root.
+            # Sony archives may contain nested version roots, e.g.
+            # WebKit-1400/WebKit-1400/Source/... instead of Source/...
+            # Remove each leading WebKit version directory, not source folders.
             import re
+            version_root = re.compile(r'WebKit[-_]\d+(?:\.\d+)?', re.IGNORECASE)
             normalized_roots = set()
             for item in entries:
                 parts = PurePosixPath(item.filename).parts
-                if not parts or item.filename.startswith('/') or any(part in ('.', '..') for part in parts):
+                if not parts or item.filename.startswith('/') or any(part in ('', '.', '..') for part in parts):
                     continue
-                is_version_root = (len(parts) > 1 and
-                    re.fullmatch(r'WebKit[-_]\d+(?:\.\d+)?', parts[0], flags=re.I) is not None)
-                if is_version_root:
-                    normalized_roots.add(parts[0])
-                key = '/'.join(parts[1:] if is_version_root else parts)
+                start = 0
+                while start < len(parts) - 1 and version_root.fullmatch(parts[start]):
+                    normalized_roots.add(parts[start])
+                    start += 1
+                key = '/'.join(parts[start:])
                 if key in self.members:
                     raise ValueError(f'Doppelte Archivpfade nach Normalisierung: {key}')
                 self.members[key] = item
-            print(f'Pfadnormalisierung für {path.name}: {sorted(normalized_roots) or "bereits flach"}')
+            print(f'Entfernte Versionsordner in {path.name}: {sorted(normalized_roots) or "keine"}', flush=True)
         else:
             raise ValueError(f'Quelle muss Ordner oder ZIP-Archiv sein: {path}')
 
@@ -109,10 +109,14 @@ def main():
     old, new = Source(args.old), Source(args.new)
     try:
         old_keys, new_keys = set(old.members), set(new.members)
+        common = old_keys & new_keys
+        print(f'Gemeinsame Pfade: {len(common)}; Beispiel alt: {sorted(old_keys)[:3]}; Beispiel neu: {sorted(new_keys)[:3]}', flush=True)
+        if not common:
+            raise RuntimeError('KEINE gemeinsamen Dateipfade gefunden. Archivstruktur und Normalisierung prüfen.')
         added = sorted(new_keys - old_keys)
         removed = sorted(old_keys - new_keys)
         changed = []
-        for key in sorted(old_keys & new_keys):
+        for key in sorted(common):
             # ZIP CRC32 is only a fast indicator, not a cryptographic equality proof.
             if old.stat(key) != new.stat(key):
                 changed.append(key)
