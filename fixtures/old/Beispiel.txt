@@ -1,0 +1,3 @@
+Demo-Datei (erfunden, nicht Sony-WebKit)
+Funktion A: vorhanden
+Funktion B: deaktiviert
