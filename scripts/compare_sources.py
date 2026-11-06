@@ -39,32 +39,25 @@ class Source:
         elif zipfile.is_zipfile(path):
             self.archive = zipfile.ZipFile(path)
             entries = [i for i in self.archive.infolist() if not i.is_dir()]
-            # Only strip an archive root if all paths live below one single top-level directory.
-            valid = []
+            # Sony archives may use a WebKit-1400/ root on one side but not
+            # the other, and they can also contain a root-level changelog.
+            # Normalize only the known version-specific WebKit container,
+            # regardless of how many extra files are at ZIP root.
+            import re
+            normalized_roots = set()
             for item in entries:
                 parts = PurePosixPath(item.filename).parts
-                if not parts or any(part in ('', '.', '..') for part in parts) or item.filename.startswith('/'):
+                if not parts or item.filename.startswith('/') or any(part in ('.', '..') for part in parts):
                     continue
-                valid.append(item)
-            # Sony ZIPs contain one main WebKit-XXXX/ tree, plus a changelog
-            # at the ZIP root. The old implementation required *every* file
-            # to have the same root and therefore compared different folder
-            # names instead of actual source paths.
-            from collections import Counter
-            roots = Counter(PurePosixPath(i.filename).parts[0] for i in valid
-                            if len(PurePosixPath(i.filename).parts) > 1)
-            self.main_root = None
-            if roots:
-                candidate, count = roots.most_common(1)[0]
-                if count > len(valid) * 0.5 and candidate.lower().startswith('webkit'):
-                    self.main_root = candidate
-            for item in valid:
-                parts = PurePosixPath(item.filename).parts
-                # Other root-level files are intentionally left at top level.
-                key = '/'.join(parts[1:]) if self.main_root and parts[0] == self.main_root and len(parts) > 1 else '/'.join(parts)
+                is_version_root = (len(parts) > 1 and
+                    re.fullmatch(r'WebKit[-_]\d+(?:\.\d+)?', parts[0], flags=re.I) is not None)
+                if is_version_root:
+                    normalized_roots.add(parts[0])
+                key = '/'.join(parts[1:] if is_version_root else parts)
                 if key in self.members:
                     raise ValueError(f'Doppelte Archivpfade nach Normalisierung: {key}')
                 self.members[key] = item
+            print(f'Pfadnormalisierung für {path.name}: {sorted(normalized_roots) or "bereits flach"}')
         else:
             raise ValueError(f'Quelle muss Ordner oder ZIP-Archiv sein: {path}')
 
