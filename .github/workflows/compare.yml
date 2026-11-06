@@ -1,0 +1,64 @@
+name: PS5 WebKit Quellcodevergleich
+
+on:
+  workflow_dispatch:
+    inputs:
+      mode:
+        description: 'Demo oder offiziell veröffentlichte Sony-Archive vergleichen'
+        required: true
+        default: demo
+        type: choice
+        options:
+          - demo
+          - official
+
+permissions:
+  contents: read
+
+jobs:
+  compare:
+    runs-on: ubuntu-latest
+    timeout-minutes: 55
+    steps:
+      - name: Repository laden
+        uses: actions/checkout@v4
+
+      - name: Python aktivieren
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Offizielle Quellen laden
+        if: ${{ inputs.mode == 'official' }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p data
+          curl --fail --location --retry 2 --connect-timeout 30 --max-time 1200 \
+            'https://www.playstation.com/content/dam/global_pdc/en-us/external-resources/oss/PS5/webkit/WebKit-1200.zip' \
+            --output data/WebKit-1200.zip
+          curl --fail --location --retry 2 --connect-timeout 30 --max-time 1200 \
+            'https://www.playstation.com/content/dam/global_pdc/en-us/external-resources/oss/PS5/webkit/WebKit_1400.zip' \
+            --output data/WebKit_1400.zip
+          python -c "import zipfile; assert zipfile.is_zipfile('data/WebKit-1200.zip'); assert zipfile.is_zipfile('data/WebKit_1400.zip')"
+          sha256sum data/*.zip > data/archive-sha256.txt
+
+      - name: Demo-Vergleich
+        if: ${{ inputs.mode == 'demo' }}
+        run: |
+          python scripts/compare_sources.py --old fixtures/old --new fixtures/new --mode demo --out reports
+
+      - name: Quellen-Vergleich
+        if: ${{ inputs.mode == 'official' }}
+        run: |
+          python scripts/compare_sources.py --old data/WebKit-1200.zip --new data/WebKit_1400.zip --mode official --out reports
+          cp data/archive-sha256.txt reports/
+
+      - name: Bericht als Artifact bereitstellen
+        if: ${{ always() }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: webkit-vergleich-${{ inputs.mode }}
+          path: reports/
+          if-no-files-found: warn
+          retention-days: 14
