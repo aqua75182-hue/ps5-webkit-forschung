@@ -1,0 +1,5 @@
+# Downloads und generierte Berichte nicht veröffentlichen
+data/
+reports/
+__pycache__/
+*.pyc
